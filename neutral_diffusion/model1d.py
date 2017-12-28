@@ -1,13 +1,11 @@
 import numpy as np
 import scipy
+import scipy.optimize
 import sparse
 
 from . import basis1d
-from . import solvers
 from .utils import vec2coo
-
-
-EV = 1.60217662E-19  # [J/eV]
+from .units import EV
 
 
 class Model(object):
@@ -33,10 +31,10 @@ class Model(object):
         self.phi_ijk = basis1d.phi_ijk(r)
         self.phi_ijkl = basis1d.phi_ijkl(r)
         self.phi_i_dj_dk_l = basis1d.phi_i_dj_dk_l(r)
+        self.phi_ijk_dl_m = basis1d.phi_ijk_dl_m(r)
         self.phi_ij_dk_dl_m = basis1d.phi_ij_dk_dl_m(r)
         self.slice_l = sparse.COO([np.arange(n-1), np.arange(n-1)],
                                   np.ones(n-1), shape=(n, n-1))
-        self.slice_last = sparse.COO([[1]], [1], shape=(n, ))
 
 
 class Cylindrical(Model):
@@ -75,27 +73,36 @@ class Cylindrical(Model):
                 raise ValueError('Shape mismatch, {} and {}'.format(
                                                 v.shape, t_ion.shape))
         if n_init is None:
-            n_init = t_ion / t_edge
-        n_init = n_init * EV * t_ion
+            n_init = 1.0 / t_ion
+        n_init = n_init * t_ion
 
         if t_init is None:
-            t_init = t_ion
+            t_init = np.ones_like(self.r) * t_edge
         t_init = t_init / t_ion
+        t_edge = t_edge / t_ion[-1]
 
         t_ion = EV * t_ion
+        t_ion_grad = np.gradient(t_ion, self.r)
         r_ion_cx = rate_ion + rate_cx
         rmu = self.r / (self.m * r_ion_cx)
-        Dijl_tmp = sparse.tensordot(vec2coo(rmu), self.phi_i_dj_dk_l,
-                                    axes=(0, -1))
-        Dijl = Dijl_tmp + np.moveaxis(Dijl_tmp, 0, 1)
 
         r_rion_tion = self.r * rate_ion / t_ion
+        rmu_t_ion = vec2coo(rmu * t_ion)
+        rmu_t_ion_grad = vec2coo(rmu * t_ion_grad)
+        rmu = vec2coo(rmu)
+
+        Dijl_tmp = sparse.tensordot(rmu, self.phi_i_dj_dk_l, axes=(0, -1))
+        Dijl = Dijl_tmp + np.moveaxis(Dijl_tmp, 0, 1)
+
         Ril = -sparse.tensordot(vec2coo(r_rion_tion), self.phi_ijk,
                                 axes=(0, -1))
+        Dijl *= EV  # This normalizes the order or these tensors
+        Ril *= EV
 
-        t_ion = vec2coo(t_ion)
-        Fijkl_tmp1 = sparse.tensordot(t_ion, self.phi_ij_dk_dl_m, axes=(0, -1))
-        Fijkl_tmp2 = sparse.tensordot(t_ion, self.phi_ij_dk_dl_m, axes=(0, -2))
+        Fijkl_tmp1 = sparse.tensordot(rmu_t_ion_grad, self.phi_ijk_dl_m,
+                                      axes=(0, -1))
+        Fijkl_tmp2 = sparse.tensordot(rmu_t_ion, self.phi_ij_dk_dl_m,
+                                      axes=(0, -1))
         Fijkl = (Fijkl_tmp1 + Fijkl_tmp2 + np.moveaxis(Fijkl_tmp2, 0, 1)
                  + np.moveaxis(Fijkl_tmp2, 0, 2)) * 2.5
 
@@ -111,26 +118,31 @@ class Cylindrical(Model):
         Gijl = sparse.tensordot(Gijl, self.slice_l, axes=(-1, 0))
         Hil = sparse.tensordot(Hil, self.slice_l, axes=(-1, 0))
 
-        # construct equations
-        def get_A(x):
+        # Callable to return a residual.
+        def fun(x):
+            x = np.exp(x)
             # x: size (2*(size-1), 1).
-            n = vec2coo(np.concatenate([x[:self.size-1, 0], [1.0]],
+            n = vec2coo(np.concatenate([x[:self.size-1], [1.0]],
                                        axis=0))
-            t = vec2coo(np.concatenate([x[self.size-1:, 0], [t_edge]],
+            t = vec2coo(np.concatenate([x[self.size-1:], [t_edge]],
                                        axis=0))
-            # matrix for n
-            An1 = sparse.tensordot(t, Dijl, axes=(0, 1)) + Ril
-            An2 = sparse.tensordot(t, sparse.tensordot(t, Fijkl, axes=(0, 1)),
-                                   axes=(0, 1)) + Hil
-            An = scipy.sparse.hstack([An1.to_scipy_sparse().T,
-                                      An2.to_scipy_sparse().T])
-            # matrix for t
-            At1 = sparse.tensordot(n, Dijl, axes=(0, 0))
-            At2 = sparse.tensordot(t, sparse.tensordot(n, Fijkl, axes=(0, 0)),
-                                   axes=(0, 1)) * 2.0
-            At = scipy.sparse.hstack([At1.to_scipy_sparse().T,
-                                      At2.to_scipy_sparse().T])
-            return scipy.sparse.vstack([An, At])
 
-        return get_A(np.concatenate([n_init[:-1, np.newaxis],
-                                     t_init[:-1, np.newaxis]]))
+            # particle balance
+            lhs = sparse.tensordot(n, sparse.tensordot(t, Dijl, axes=(0, 1)),
+                                   axes=(0, 0))
+            rhs = sparse.tensordot(n, Ril, axes=(0, 0))
+            res_particle = lhs - rhs
+
+            # energy balance
+            lhs = sparse.tensordot(n, sparse.tensordot(t, sparse.tensordot(
+                        t, Fijkl, axes=(0, 2)), axes=(0, 1)), axes=(0, 0))
+            rhs = sparse.tensordot(n, sparse.tensordot(t, Gijl, axes=(0, 1)),
+                                   axes=(0, 0)) + sparse.tensordot(n, Hil,
+                                                                   axes=(0, 0))
+            res_energy = lhs - rhs
+            return np.concatenate([res_particle, res_energy])
+
+        x_init = np.log(np.concatenate([n_init[:-1], t_init[:-1]]))
+        #x_init = np.concatenate([n_init[:-1], t_init[:-1]])
+        print(scipy.optimize.least_squares(fun, x_init, max_nfev=100, method='lm'))
+        raise ValueError

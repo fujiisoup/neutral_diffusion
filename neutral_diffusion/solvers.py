@@ -2,7 +2,7 @@ import numpy as np
 import scipy as sp
 
 
-def solve(A, x, b, maxiter=1000, tol=1.0e-5, inner_iter=3, method='iterative'):
+def solve(fun, jac, x, maxiter=1000, tol=1.0e-5, method='neuton'):
     """
     Solve non-linear equation A(x) x = b.
 
@@ -34,29 +34,3 @@ def solve(A, x, b, maxiter=1000, tol=1.0e-5, inner_iter=3, method='iterative'):
         return it, x.reshape(-1)
     elif method == 'scipy':
         raise NotImplementedError
-
-
-def solve_iterative(A, x, b, maxiter=1000, tol=1.0e-5, inner_iter=3):
-    """
-    Solve non-linear equation
-    A(x) x = b
-    by a non-linear equation.
-    """
-    n = len(x)
-    for i in range(maxiter):
-        Amat = A(x)
-        # normalize
-        Adiag = Amat.diagonal(0).reshape(-1, 1)
-        bvec = b / Adiag
-        Amat = -Amat / Adiag + sp.sparse.identity(n)
-
-        # update
-        xnew = x
-        for j in range(inner_iter):
-            xnew = np.dot(Amat, xnew) + bvec
-
-        if np.max(np.abs(xnew - x)) < tol:
-            return i, x
-        x = xnew
-
-    return maxiter, x

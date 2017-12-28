@@ -95,21 +95,71 @@ def phi_ijkl(x):
     for i in range(size):
         if i < size - 1:
             ind.append((i, i, i, i))
-            val.append(dx[i] * 3.0 / 20.0)
+            val.append(dx[i] / 5.0)
 
-            for index in itertools.product([i], [i, i+1], [i, i+1], [i, i+1]):
+            # 3 bases are in the same position
+            for index in ([i, i, i, i+1], [i, i, i+1, i], [i, i+1, i, i],
+                          [i, i+1, i+1, i+1]):
                 ind.append(index)
                 val.append(dx[i] / 20.0)
 
+            # 2 bases are in the same position
+            for index in ([i, i, i+1, i+1], [i, i+1, i, i+1],
+                          [i, i+1, i+1, i]):
+                ind.append(index)
+                val.append(dx[i] / 30.0)
+
         if i > 0:
             ind.append((i, i, i, i))
-            val.append(dx[i-1] * 3.0 / 20.0)
+            val.append(dx[i-1] / 5.0)
 
-            for index in itertools.product([i], [i, i-1], [i, i-1], [i, i-1]):
+            # 3 bases are in the same position
+            for index in ([i, i, i, i-1], [i, i, i-1, i], [i, i-1, i, i],
+                          [i, i-1, i-1, i-1]):
                 ind.append(index)
                 val.append(dx[i-1] / 20.0)
 
+            # 2 bases are in the same position
+            for index in ([i, i, i-1, i-1], [i, i-1, i, i-1],
+                          [i, i-1, i-1, i]):
+                ind.append(index)
+                val.append(dx[i-1] / 30.0)
+
     return sparse.COO(np.array(ind).T, val, shape=(size, ) * 4)
+
+
+def phi_di_dj_k(x):
+    """
+    Get a 3d-tensor \int dphi_i_dr(r) dphi_j_dr(r) phi_k(r) dr
+
+    Parameters
+    ----------
+    x: 1d np.array
+
+    Returns
+    -------
+    phi_ijkl: sparse.COO
+    """
+    size = len(x)
+    dx_inv = 1.0 / np.diff(x)
+
+    ind = []
+    val = []
+    for i in range(size):
+
+        if i < size - 1:
+            for (j, k), sgn in [((i, i), 1.0), ((i, i+1), 1.0),
+                                ((i+1, i), -1.0), ((i+1, i+1), -1.0)]:
+                ind.append((i, j, k))
+                val.append(sgn * dx_inv[i] / 2.0)
+
+        if i > 0:
+            for (j, k), sgn in [((i, i), 1.0), ((i, i-1), 1.0),
+                                ((i-1, i), -1.0), ((i-1, i-1), -1.0)]:
+                ind.append((i, j, k))
+                val.append(sgn * dx_inv[i-1] / 2.0)
+
+    return sparse.COO(np.array(ind).T, val, shape=(size, ) * 3)
 
 
 def phi_i_dj_dk_l(x):
@@ -167,15 +217,17 @@ def phi_ijk_dl_m(x):
     val = []
     for i in range(size):
         if i < size - 1:
-            for l, sgn in [(i, 1.0), (i+1, -1.0)]:
+            for l, sgn in [(i, -1.0), (i+1, 1.0)]:
                 ind.append((i, i, i, l, i))
                 val.append(sgn / 5.0)
 
+                # 3 bases are in the same position
                 for i, j, k, m in [(i, i, i, i+1), (i, i, i+1, i),
                                    (i, i+1, i, i), (i, i+1, i+1, i+1)]:
                     ind.append((i, j, k, l, m))
                     val.append(sgn / 20.0)
 
+                # 2 bases are in the same position
                 for i, j, k, m in [(i, i, i+1, i+1), (i, i+1, i+1, i),
                                    (i, i+1, i, i+1)]:
                     ind.append((i, j, k, l, m))
@@ -218,22 +270,20 @@ def phi_ij_dk_dl_m(x):
     val = []
     for i in range(size):
         if i < size - 1:
-            for k, l, sgn in [(i, i, 1.0), (i, i+1, -1.0),
-                              (i+1, i, -1.0), (i+1, i+1, 1.0)]:
+            for (l, k), sgn in [((i, i), 1.0), ((i, i+1), -1.0),
+                                ((i+1, i), -1.0), ((i+1, i+1), 1.0)]:
                 ind.append((i, i, k, l, i))
                 val.append(sgn * dx_inv[i] / 4.0)
-
-                for i, j, m in itertools.product([i], [i, i+1], [i, i+1]):
+                for (j, m) in [(i, i+1), (i+1, i), (i+1, i+1)]:
                     ind.append((i, j, k, l, m))
                     val.append(sgn * dx_inv[i] / 12.0)
 
         if i > 0:
-            for k, l, sgn in [(i, i, 1.0), (i, i-1, -1.0),
-                              (i-1, i, -1.0), (i-1, i-1, 1.0)]:
+            for (l, k), sgn in [((i, i), 1.0), ((i, i-1), -1.0),
+                                ((i-1, i), -1.0), ((i-1, i-1), 1.0)]:
                 ind.append((i, i, k, l, i))
                 val.append(sgn * dx_inv[i-1] / 4.0)
-
-                for i, j, m in itertools.product([i], [i, i-1], [i, i-1]):
+                for (j, m) in [(i, i-1), (i-1, i), (i-1, i-1)]:
                     ind.append((i, j, k, l, m))
                     val.append(sgn * dx_inv[i-1] / 12.0)
 
