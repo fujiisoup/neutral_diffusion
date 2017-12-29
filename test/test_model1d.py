@@ -5,7 +5,8 @@ from neutral_diffusion import model1d
 from neutral_diffusion.constants import EV
 
 
-r = np.linspace(0, 1.0, 30) ** 2.0
+r = np.cumsum(np.linspace(0.1, 0.01, 30))
+r /= r[-1]
 size = len(r)
 rion = ((1 - r**4) + 0.1) * 1.0e6  # [/s]
 rcx = rion * 2  # [/s]
@@ -75,18 +76,19 @@ def test_jac():
 def test_cylindrical_tfix(use_jac, always_positive, method):
     model = model1d.Cylindrical(r, m)
     tatom = tion * 0.5 - 2.0
-    n, t, success = model.solve(rion, rcx, tion, tatom[-1], t_init=tatom,
-                                optimize_t=False, use_jac=use_jac,
-                                always_positive=always_positive)
-    assert success
+    model.initialize(rion, rcx, tion, tatom[-1])
+    n, t, res = model.solve_n(n_init=1.0 / tion, t_init=tatom,
+                              use_jac=use_jac, always_positive=always_positive)
+    assert res['success']
     assert np.allclose(t, tatom)
     # make sure this solution satisfies the differential equation
     rmu = r / (m * (rion + rcx))
     dndr = np.gradient(EV * n * t, r)
     lhs = np.gradient(rmu * dndr, r)
     rhs = r * rion * n
-    # TODO add validation test
-    #assert np.allclose(lhs, rhs, rtol=1.0e-1)
+
+    if not always_positive:
+        assert np.allclose(lhs[:-2], rhs[:-2], rtol=0.3)
 
 
 @pytest.mark.parametrize('use_jac', [False, True])
@@ -95,43 +97,42 @@ def test_cylindrical_tfix(use_jac, always_positive, method):
 def test_cylindrical_nfix(use_jac, always_positive, method):
     model = model1d.Cylindrical(r, m)
     tatom = tion * 0.5 - 2.0
-    n, t, success = model.solve(rion, rcx, tion, tatom[-1], t_init=tatom,
-                                optimize_t=False, use_jac=use_jac,
-                                always_positive=False)
-    n, t, success = model.solve(rion, rcx, tion, 3.0, n_init=n, t_init=t,
-                                optimize_n=False, use_jac=use_jac,
-                                always_positive=always_positive)
-    assert success
+    model.initialize(rion, rcx, tion, tatom[-1])
+    n, t, res = model.solve_n(n_init=1.0 / tion, t_init=tatom,
+                              use_jac=use_jac, always_positive=always_positive)
+    n, t, res = model.solve_t(n_init=n, t_init=t, use_jac=use_jac,
+                              always_positive=always_positive)
+    assert res['success']
     # make sure this solution satisfies the differential equation
+    kT = EV * t
     rmu = r / (m * (rion + rcx))
-    dndr = np.gradient(EV * n * t, r)
+    dndr = np.gradient(2.5 * n * kT**2, r)
     lhs = np.gradient(rmu * dndr, r)
-    rhs = r * rion * n
-    #print(lhs)
-    #print(rhs)
-    # TODO validation test
-    #assert np.allclose(lhs, rhs, rtol=1.0e-1)
-
-
-@pytest.mark.parametrize('use_jac', [True, False])
-@pytest.mark.parametrize('always_positive', [True])
-@pytest.mark.parametrize('method', [None])
-def test_cylindrical(use_jac, always_positive, method):
-    model = model1d.Cylindrical(r, m)
-    n, t, success = model.solve(rion, rcx, tion, 3.0,
-                                optimize_t=True, use_jac=use_jac,
-                                always_positive=always_positive)
-    assert success
-    print(n)
+    rhs = 1.5 * r * (rion + rcx) * n * kT - 1.5 * r * rcx * EV * tion
+    lhs /= EV
+    rhs /= EV
     print(t)
-    print(tion)
-    # make sure this solution satisfies the differential equation
-    rmu = r / (m * (rion + rcx))
-    dndr = np.gradient(EV * n * t, r)
-    lhs = np.gradient(rmu * dndr, r)
-    rhs = r * rion * n
     print(lhs)
     print(rhs)
+    # TODO validation test
+    assert np.allclose(lhs, rhs, rtol=1.0e-1)
+    raise ValueError
+
+
+@pytest.mark.parametrize('always_positive', [False])
+@pytest.mark.parametrize('method', [None])
+def test_cylindrical(always_positive, method):
+    model = model1d.Cylindrical(r, m)
+    n, t, res = model.solve(rion, rcx, tion, 3.0,
+                            always_positive=always_positive)
+    print(n)
+    print(t)
+    assert res['success']
+    # make sure this solution satisfies the differential equation
+    rmu = r / (m * (rion + rcx))
+    dndr = np.gradient(EV * n * t, r)
+    lhs = np.gradient(rmu * dndr, r)
+    rhs = r * rion * n
     assert np.allclose(lhs, rhs, rtol=1.0e-1)
 
 

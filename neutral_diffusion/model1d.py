@@ -43,8 +43,7 @@ class Cylindrical(Model):
     plasmas.
     """
     def solve(self, rate_ion, rate_cx, t_ion, t_edge, n_init=None, t_init=None,
-              optimize_n=True, optimize_t=True,
-              use_jac=True, always_positive=False, **kwargs):
+              always_positive=False, **kwargs):
         """
         Solve a diffusion equation with particular paramters.
 
@@ -60,10 +59,6 @@ class Cylindrical(Model):
             Initial guess of atom density [m^-3]
         t_init: 1d array-like
             Initial guess of atom temperature [eV]
-        optimize_t: Boolean
-            If true also optimize t_atom.
-        optimize_t: Boolean
-            If true also optimize t_atom.
 
         Returns
         -------
@@ -73,28 +68,31 @@ class Cylindrical(Model):
         t_atom: 1d array-like
             Neutral atom temperature.
         """
+        self.initialize(rate_ion, rate_cx, t_ion, t_edge)
+
         if n_init is None:
             n_init = 1.0 / t_ion
 
         if t_init is None:
-            t_init = np.ones_like(self.r) * t_edge
+            # with complete thermalize limit
+            t_1 = t_ion
+            n_1, t_1, _ = self.solve_n(n_init, t_1, True, False, **kwargs)
+            n_1, t_1, res_1 = self.solve_t(n_1, t_1, True, False, **kwargs)
 
-        self.initialize(rate_ion, rate_cx, t_ion, t_edge)
+            t_2 = np.ones_like(t_ion) * t_edge
+            n_2, t_2, _ = self.solve_n(n_init, t_2, True, False, **kwargs)
+            n_2, t_2, res_2 = self.solve_t(n_2, t_2, True, False, **kwargs)
 
-        if not optimize_t:
-            return self.solve_n(n_init, t_init, use_jac, always_positive,
-                                **kwargs)
+            n_3, t_3, res_3 = self.solve_t((n_1 + n_2) / 2, t_2, True, False,
+                                           **kwargs)
 
-        if not optimize_n:
-            return self.solve_t(n_init, t_init, use_jac, always_positive,
-                                **kwargs)
-
-        ninit, tinit, _ = self.solve_n(n_init, t_init, use_jac, False,
-                                       **kwargs)
-        ninit, tinit, _ = self.solve_t(n_init, t_init, use_jac, True,
-                                       **kwargs)
-        return self.solve_nt(n_init, t_init, use_jac, always_positive,
-                             **kwargs)
+            n_inits = [n_1, n_2, n_3]
+            t_inits = [t_1, t_2, t_3]
+            errors = [res_1['optimality'], res_2['optimality'],
+                      res_3['optimality']]
+            n_init = n_inits[np.argmin(errors)]
+            t_init = t_inits[np.argmin(errors)]
+        return self.solve_nt(n_init, t_init, True, always_positive, **kwargs)
 
     def initialize(self, rate_ion, rate_cx, t_ion, t_edge):
         for v in [rate_ion, rate_cx, t_ion]:
@@ -205,7 +203,7 @@ class Cylindrical(Model):
         n = self.get_n(res['x'], always_positive).todense()
         n = n / self.kt_ion * self.kt_ion[-1]
         t = t_init * self.kt_ion / EV
-        return n, t, res['success']
+        return n, t, res
 
     def solve_t(self, n_init, t_init, use_jac, always_positive, **kwargs):
         def fun(x):
@@ -230,7 +228,7 @@ class Cylindrical(Model):
             res = scipy.optimize.least_squares(fun, x_init, **kwargs)
         n = n_init / self.kt_ion * self.kt_ion[-1]
         t = self.get_t(res['x'], always_positive).todense() * self.kt_ion / EV
-        return n, t, res['success']
+        return n, t, res
 
     def solve_nt(self, n_init, t_init, use_jac, always_positive, **kwargs):
         def fun(x):
@@ -265,4 +263,4 @@ class Cylindrical(Model):
         n = n.todense() / self.kt_ion * self.kt_ion[-1]
         t = self.get_t(res['x'][self.size-1:], always_positive)
         t = t.todense() * self.kt_ion / EV
-        return n, t, res['success']
+        return n, t, res
