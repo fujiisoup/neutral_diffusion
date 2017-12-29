@@ -19,8 +19,9 @@ def test_cylindrical(use_jac, always_positive, method):
     n, success = model.solve(diffusion_coef, source, use_jac=use_jac,
                              always_positive=always_positive)
     assert success
-    
+
     # make sure this solution satisfies the differential equation
     dndr = np.gradient(n, r)
-    lhs = - np.gradient(r * diffusion_coef * dndr, r) + r * source * n
-    assert np.allclose(lhs, 0, atol=1.0e-1)
+    lhs = np.gradient(r * diffusion_coef * dndr, r)
+    rhs = r * source * n
+    assert np.allclose(lhs, rhs, atol=1.0e-2, rtol=0.1)

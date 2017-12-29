@@ -5,7 +5,6 @@ import sparse
 
 from . import basis1d
 from .utils import vec2coo
-from .units import EV
 
 
 class Model(object):
@@ -53,7 +52,7 @@ class Cylindrical(Model):
     D : diffusion coefficient [m^2/s],
     S : source rate [/s].
     """
-    def solve(self, diffusion_coef, source, n_init=None, t_init=None,
+    def solve(self, diffusion_coef, source, n_init=None,
               use_jac=True, always_positive=False, **kwargs):
         """
         Solve a diffusion equation with particular paramters.
@@ -80,7 +79,7 @@ class Cylindrical(Model):
         for v in [diffusion_coef, source]:
             if v.shape != self.r.shape:
                 raise ValueError('Shape mismatch, {} and {}'.format(
-                                                v.shape, t_ion.shape))
+                                                v.shape, self.r.shape))
         if n_init is None:
             n_init = np.ones_like(self.r)
 
@@ -103,18 +102,19 @@ class Cylindrical(Model):
             if always_positive:
                 x = scipy.sparse.diags(np.exp(x))
                 jacobian = sparse.tensordot(Dij, self.slice_l, axes=(0, 0))
-                jacobian = jacobian.to_scipy_sparse().dot(x)
+                return jacobian.to_scipy_sparse().dot(x)
             else:
-                jacobian = sparse.tensordot(Dij, self.slice_l, axes=(0, 0))
+                return sparse.tensordot(Dij, self.slice_l, axes=(0, 0))
 
-            # TODO using to_scipy_sparse significantly slowen the speed...
-            #return jacobian.to_scipy_sparse()
-            return np.array(jacobian.todense())
+        def jac_dense(x):
+            # TODO The use of the sparse jacobian looks very slow in scipy
+            return np.array(jac(x).todense())
 
         # initial guess
         x_init = np.log(n_init[:-1]) if always_positive else n_init[:-1]
         if use_jac:
-            res = scipy.optimize.least_squares(fun, x_init, jac=jac, **kwargs)
+            res = scipy.optimize.least_squares(fun, x_init, jac=jac_dense,
+                                               **kwargs)
         else:
             res = scipy.optimize.least_squares(fun, x_init, **kwargs)
 

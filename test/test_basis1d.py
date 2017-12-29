@@ -71,85 +71,90 @@ def randint_neibor(i):
     return j
 
 
+atol = 1.0e3
+rtol = 0.05
+
+
 def test_phi_ij():
     phi = basis1d.phi_ij(x).todense()
     for (i, j) in rng.randint(0, n, size=(100, 2)):
-        assert_close(integrate(Phi(i, x), Phi(j, x)), phi[i, j], atol=1.0e-2)
+        assert_close(integrate(Phi(i, x), Phi(j, x)), phi[i, j],
+                     atol=atol, rtol=rtol)
         j = randint_neibor(i)
-        assert_close(integrate(Phi(i, x), Phi(j, x)), phi[i, j], atol=1.0e-2)
+        assert_close(integrate(Phi(i, x), Phi(j, x)), phi[i, j],
+                     atol=atol, rtol=rtol)
 
 
 def test_phi_ijk():
     phi = basis1d.phi_ijk(x).todense()
-    for (i, j, k) in rng.randint(0, n, size=(100, 3)):
+    for (i, j, k) in rng.randint(0, n, size=(300, 3)):
         assert_close(integrate(Phi(i, x), Phi(j, x), Phi(k, x)),
-                     phi[i, j, k], atol=1.0e-2)
+                     phi[i, j, k], atol=atol, rtol=rtol)
         j = randint_neibor(i)
         k = randint_neibor(i)
         assert_close(integrate(Phi(i, x), Phi(j, x), Phi(k, x)),
-                     phi[i, j, k], atol=1.0e-2)
-
+                     phi[i, j, k], atol=atol, rtol=rtol)
 
 def test_phi_di_dj_k():
     phi = basis1d.phi_di_dj_k(x).todense()
-    for (i, j, k) in rng.randint(0, n, size=(100, 3)):
+    for (i, j, k) in rng.randint(0, n, size=(300, 3)):
         assert_close(integrate(dPhi(i, x), dPhi(j, x), Phi(k, x)),
-                     phi[i, j, k], atol=1.0e-2)
+                     phi[i, j, k], atol=atol, rtol=rtol)
         j = randint_neibor(i)
         k = randint_neibor(i)
         assert_close(integrate(dPhi(i, x), dPhi(j, x), Phi(k, x)),
-                     phi[i, j, k], atol=1.0e-2)
+                     phi[i, j, k], atol=atol, rtol=rtol)
 
 
 def test_phi_ijkl():
     phi = basis1d.phi_ijkl(x).todense()
 
-    for (i, j, k, l) in rng.randint(0, n, size=(100, 4)):
+    for (i, j, k, l) in rng.randint(0, n, size=(300, 4)):
         assert_close(integrate(Phi(i, x), Phi(j, x), Phi(k, x), Phi(l, x)),
-                     phi[i, j, k, l], atol=1.0e-2)
+                     phi[i, j, k, l], atol=atol, rtol=rtol)
         j = randint_neibor(i)
         k = randint_neibor(i)
         l = randint_neibor(i)
         assert_close(integrate(Phi(i, x), Phi(j, x), Phi(k, x), Phi(l, x)),
-                     phi[i, j, k, l], atol=1.0e-2)
+                     phi[i, j, k, l], atol=atol, rtol=rtol)
 
 
 def test_phi_i_dj_dk_l():
     phi = basis1d.phi_i_dj_dk_l(x).todense()
 
-    for (i, j, k, l) in rng.randint(0, n, size=(100, 4)):
+    for (i, j, k, l) in rng.randint(0, n, size=(300, 4)):
         assert_close(integrate(Phi(i, x), dPhi(j, x), dPhi(k, x), Phi(l, x)),
-                     phi[i, j, k, l], atol=1.0e-2)
+                     phi[i, j, k, l], atol=atol, rtol=rtol)
         j = randint_neibor(i)
         k = randint_neibor(i)
         l = randint_neibor(i)
         assert_close(integrate(Phi(i, x), dPhi(j, x), dPhi(k, x), Phi(l, x)),
-                     phi[i, j, k, l], atol=1.0e-2)
+                     phi[i, j, k, l], atol=atol, rtol=rtol)
 
 
 def test_phi_ijk_dl_m():
     phi = basis1d.phi_ijk_dl_m(x).todense()
 
-    for (i, j, k, l, m) in rng.randint(0, n, size=(100, 5)):
+    for (i, j, k, l, m) in rng.randint(0, n, size=(300, 5)):
         assert_close(integrate(Phi(i, x), Phi(j, x), Phi(k, x), dPhi(l, x),
                                Phi(m, x)),
-                     phi[i, j, k, l, m], atol=1.0e-2)
+                     phi[i, j, k, l, m], atol=atol, rtol=rtol)
         j = randint_neibor(i)
         k = randint_neibor(i)
         l = randint_neibor(i)
         m = randint_neibor(i)
         assert_close(integrate(Phi(i, x), Phi(j, x), Phi(k, x), dPhi(l, x),
                                Phi(m, x)),
-                     phi[i, j, k, l, m], atol=1.0e-2)
+                     phi[i, j, k, l, m], atol=atol, rtol=rtol)
 
 
 def test_phi_ij_dk_dl_m():
     phi = basis1d.phi_ij_dk_dl_m(x).todense()
 
-    for (i, j, k, l, m) in rng.randint(0, n, size=(100, 5)):
+    for (i, j, k, l, m) in rng.randint(0, n, size=(300, 5)):
         assert_close(integrate(Phi(i, x), Phi(j, x), dPhi(k, x), dPhi(l, x),
                                Phi(m, x)),
-                     phi[i, j, k, l, m], atol=1.0e-2)
+                     phi[i, j, k, l, m], atol=atol, rtol=rtol)
         j = randint_neibor(i)
         k = randint_neibor(i)
         l = randint_neibor(i)
@@ -157,4 +162,4 @@ def test_phi_ij_dk_dl_m():
         print(i, j, k, l, m)
         assert_close(integrate(Phi(i, x), Phi(j, x), dPhi(k, x), dPhi(l, x),
                                Phi(m, x)),
-                     phi[i, j, k, l, m], atol=1.0e-2)
+                     phi[i, j, k, l, m], atol=atol, rtol=rtol)
