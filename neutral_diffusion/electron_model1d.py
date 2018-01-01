@@ -87,9 +87,6 @@ class Cylindrical(Model):
                                self.phi_di_dj_k, axes=(0, -1))
         Rij = -sparse.tensordot(vec2coo(self.r * source),
                                 self.phi_ijk, axes=(0, -1))
-
-        print(Dij.todense()[:, -5:])
-        print(Rij.todense()[:, -5:])
         # Remove last item of last dimension
         Dij = sparse.tensordot(Dij - Rij, self.slice_l, axes=(-1, 0))
 
