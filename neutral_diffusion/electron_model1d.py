@@ -88,6 +88,8 @@ class Cylindrical(Model):
         Rij = -sparse.tensordot(vec2coo(self.r * source),
                                 self.phi_ijk, axes=(0, -1))
 
+        print(Dij.todense()[:, -5:])
+        print(Rij.todense()[:, -5:])
         # Remove last item of last dimension
         Dij = sparse.tensordot(Dij - Rij, self.slice_l, axes=(-1, 0))
 
@@ -119,4 +121,4 @@ class Cylindrical(Model):
             res = scipy.optimize.least_squares(fun, x_init, **kwargs)
 
         n = np.exp(res['x']) if always_positive else res['x']
-        return np.concatenate([n, [1.0]]), res['success']
+        return np.concatenate([n, [1.0]]), res

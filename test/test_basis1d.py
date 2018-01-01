@@ -4,7 +4,7 @@ from neutral_diffusion import basis1d
 
 
 rng = np.random.RandomState(0)
-n = 10
+n = 5
 x = np.cumsum(np.exp(rng.randn(n) * 0.2) + 1.0) + 3.0
 dx = np.diff(x)
 dx_inv = 1.0 / dx
@@ -30,7 +30,7 @@ class Phi(object):
         if i > 0 and x <= self.x[i]:
             return (x - self.x[i-1]) / (self.x[i] - self.x[i-1])
         # x is in the decreasing part
-        if i < len(self.x) and x <= self.x[i+1]:
+        if i < len(self.x) - 1 and x <= self.x[i+1]:
             return (self.x[i+1] - x) / (self.x[i+1] - self.x[i])
         return 0.0
 
@@ -43,21 +43,24 @@ class dPhi(Phi):
         if i > 0 and x <= self.x[i-1] or i == 0 and x <= self.x[i]:
             return 0.0
         # x is in the increasing part
-        if i > 0 and x <= self.x[i]:
+        if i > 0 and x < self.x[i]:
             return 1.0 / (self.x[i] - self.x[i-1])
+        if x == self.x[i]:
+            return 0.0
         # x is in the decreasing part
-        if i < len(self.x) and x <= self.x[i+1]:
+        if i < len(self.x) - 1 and x <= self.x[i+1]:
             return -1.0 / (self.x[i+1] - self.x[i])
         return 0.0
 
 
 def integrate(*phi_list):
     """ Numerically integrate phi_i * phi_j * ... """
-    n_fine = 1000
-    x_fine = np.linspace(x[0], x[-1], n_fine)
+    n_fine = 100
+    x_fine = np.concatenate([np.linspace(x[i], x[i+1], n_fine)[:-1] for i in
+                             range(n-1)])
     integrand = np.ones_like(x_fine)
     for phi in phi_list:
-        for i in range(n_fine):
+        for i in range(len(x_fine)):
             integrand[i] *= phi(x_fine[i])
     return np.trapz(integrand, x_fine)
 
@@ -71,7 +74,7 @@ def randint_neibor(i):
     return j
 
 
-atol = 1.0e3
+atol = 1.0e-3
 rtol = 0.05
 
 
@@ -94,6 +97,7 @@ def test_phi_ijk():
         k = randint_neibor(i)
         assert_close(integrate(Phi(i, x), Phi(j, x), Phi(k, x)),
                      phi[i, j, k], atol=atol, rtol=rtol)
+
 
 def test_phi_di_dj_k():
     phi = basis1d.phi_di_dj_k(x).todense()
@@ -159,7 +163,6 @@ def test_phi_ij_dk_dl_m():
         k = randint_neibor(i)
         l = randint_neibor(i)
         m = randint_neibor(i)
-        print(i, j, k, l, m)
         assert_close(integrate(Phi(i, x), Phi(j, x), dPhi(k, x), dPhi(l, x),
                                Phi(m, x)),
                      phi[i, j, k, l, m], atol=atol, rtol=rtol)
