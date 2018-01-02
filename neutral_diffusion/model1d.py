@@ -170,7 +170,7 @@ class Cylindrical(object):
         n = n.todense()[:-1]
         nt = nt.todense()[:-1]
         nt2 = nt2.todense()[:-1]
-        return (nt * nt - n * nt2) / self.t_ion[:-1]**2
+        return (nt * nt - n * nt2) / self.t_ion[:-1]
 
     def _jac_n_particle(self, n, nt, nt2):
         return -sparse.tensordot(self.rate.Rij + self.rate.Sij,
@@ -196,17 +196,17 @@ class Cylindrical(object):
 
     def _jac_n_identity(self, n, nt, nt2):
         return sparse.COO([np.arange(self.size-1), np.arange(self.size-1)],
-                          - nt2.todense()[:-1] / self.t_ion[:-1]**2,
+                          - nt2.todense()[:-1] / self.t_ion[:-1],
                           shape=(self.size-1, self.size-1))
 
     def _jac_nt_identity(self, n, nt, nt2):
         return sparse.COO([np.arange(self.size-1), np.arange(self.size-1)],
-                          2.0 * nt.todense()[:-1] / self.t_ion[:-1]**2,
+                          2.0 * nt.todense()[:-1] / self.t_ion[:-1],
                           shape=(self.size-1, self.size-1))
 
     def _jac_nt2_identity(self, n, nt, nt2):
         return sparse.COO([np.arange(self.size-1), np.arange(self.size-1)],
-                          - n.todense()[:-1] / self.t_ion[:-1]**2,
+                          - n.todense()[:-1] / self.t_ion[:-1],
                           shape=(self.size-1, self.size-1))
 
     def solve_nt(self, n_init, t_init, use_jac, always_positive, alpha=1.0e3,
@@ -239,23 +239,34 @@ class Cylindrical(object):
                 axis=1)
 
             if always_positive:
-                jac_nt *= np.exp(x)
+                return jac_nt.todense() * np.exp(x)
             return jac_nt.todense()
 
         # initial guess
         n_init = n_init
         nt_init = n_init * t_init
-        nt2_init = n_init * t_init * t_init
+        nt2_init = n_init * t_init * np.max(t_init)
         x_init = np.concatenate([n_init[:-1], nt_init[:-1], nt2_init[:-1]])
         x_init = np.log(x_init) if always_positive else x_init
         x_scale = 1.0 if always_positive else np.concatenate([
             1.0 / self.t_ion[:-1], np.ones_like(self.t_ion[:-1]),
             self.t_ion[:-1]])
         if use_jac:
-            res = scipy.optimize.least_squares(fun, x_init, jac=jac, x_scale=x_scale, **kwargs)
+            if kwargs.get('method', None) == 'leastsq':
+                kwargs.pop('method')
+                x, cov, res, msg, _ = scipy.optimize.leastsq(
+                        fun, x_init, Dfun=jac, full_output=True, diag=x_scale,
+                        **kwargs)
+                res['x'] = x
+                res['message'] = msg
+            else:
+                res = scipy.optimize.least_squares(fun, x_init, jac=jac,
+                                                   x_scale=x_scale,
+                                                   **kwargs)
+
         else:
             res = scipy.optimize.least_squares(
-                fun, x_init, bounds=(0.0, np.inf), x_scale=x_scale, **kwargs)
+                fun, x_init, x_scale=x_scale, **kwargs)
         n = self.get_n(res['x'][:self.size-1], always_positive).todense()
         nt = self.get_nt(res['x'][self.size-1:2*(self.size-1)],
                          always_positive).todense()

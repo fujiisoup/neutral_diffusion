@@ -146,16 +146,17 @@ def _test_jac_mix():
         assert np.allclose(jac[:, i], (fun_dt - fun) / delta, rtol=1.0e-3)
 
 
-@pytest.mark.parametrize('use_jac', [True, False])
-@pytest.mark.parametrize('always_positive', [False])
-@pytest.mark.parametrize('method', ['lm'])
+@pytest.mark.parametrize('use_jac', [False, True])
+@pytest.mark.parametrize('always_positive', [False, True])
+@pytest.mark.parametrize('method', ['leastsq'])
 def test_cylindrical(use_jac, always_positive, method):
     model = model1d.Cylindrical(r, m)
-    tatom = tion - 2.0
+    tatom = 0.8 * tion - 2.0
     model.initialize(rion, rcx, tion, tatom[-1], n_edge=1.0)
     n, t, res = model.solve_nt(
         n_init=1.0 / tatom * tatom[-1], t_init=tatom, use_jac=use_jac,
-        always_positive=always_positive, alpha=1.0e-13, method=method)
+        always_positive=always_positive, alpha=1.0e6, method=method,
+        factor=1.0)
     #   assert res['success']
     print(n)
     print(t)
