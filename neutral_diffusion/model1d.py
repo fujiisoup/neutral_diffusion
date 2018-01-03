@@ -22,6 +22,7 @@ class Rate(object):
         self.phi_di_dj_k = basis1d.phi_di_dj_k(r)
         self.slice_l = sparse.COO([np.arange(n-1), np.arange(n-1)],
                                   np.ones(n-1), shape=(n, n-1))
+        self.slice_last = sparse.COO([(n-1, )], [1.0], shape=(n, ))
 
     def initialize(self, rate_dep, rate_cx, t_ion):
         raise NotImplementedError
@@ -153,6 +154,55 @@ class Cylindrical(object):
     def get_nt2(self, x, always_positive):
         nt2 = np.exp(x) if always_positive else x
         return vec2coo(np.concatenate([nt2, [self.nt2_edge]], axis=0))
+
+    def A_particle(self):
+        jac_n = -sparse.tensordot(self.rate.Rij + self.rate.Sij,
+                                  self.rate.slice_l, axes=(0, 0))
+        jac_nt = sparse.tensordot(self.rate.Dij,
+                                  self.rate.slice_l, axes=(0, 0))
+        jac_nt2 = sparse.COO([], [], shape=(self.size-1, self.size-1))
+        return sparse.concatenate([jac_n, jac_nt, jac_nt2], axis=0).T
+
+    def b_particle(self, n_edge, nt_edge, nt2_edge):
+        b_n = -sparse.tensordot(self.rate.Rij + self.rate.Sij,
+                                self.rate.slice_last, axes=(0, 0))
+        b_nt = sparse.tensordot(self.rate.Dij,
+                                self.rate.slice_last, axes=(0, 0))
+        b_nt2 = np.zeros(self.size-1)
+        return - (b_n.todense() * n_edge + b_nt.todense() * nt_edge +
+                  b_nt2 * nt2_edge)
+
+    def A_energy(self):
+        jac_n = -1.5 * sparse.tensordot(self.rate.Eij, self.rate.slice_l,
+                                        axes=(0, 0))
+        jac_nt = -1.5 * sparse.tensordot(self.rate.Rij, self.rate.slice_l,
+                                         axes=(0, 0))
+        jac_nt2 = 2.5 * sparse.tensordot(self.rate.Dij, self.rate.slice_l,
+                                         axes=(0, 0))
+        return sparse.concatenate([jac_n, jac_nt, jac_nt2], axis=0).T
+
+    def b_energy(self, n_edge, nt_edge, nt2_edge):
+        b_n = -1.5 * sparse.tensordot(self.rate.Eij, self.rate.slice_last,
+                                      axes=(0, 0))
+        b_nt = -1.5 * sparse.tensordot(self.rate.Rij, self.rate.slice_last,
+                                       axes=(0, 0))
+        b_nt2 = 2.5 * sparse.tensordot(self.rate.Dij, self.rate.slice_last,
+                                       axes=(0, 0))
+        return -(b_n.todense() * n_edge + b_nt.todense() * nt_edge +
+                 b_nt2.todense() * nt2_edge)
+
+    def Ct(self):
+        n = self.size-1
+        return sparse.COO([np.arange(2*n), np.arange(2*n),
+                           np.concatenate([np.arange(n), np.arange(n)])],
+                          np.concatenate([np.ones(n), 1.0/self.t_ion[:-1]]),
+                          shape=(2*n, 3*n, n))
+
+    def D(self):
+        n = self.size-1
+        return sparse.COO([np.arange(2*n), np.arange(n, 3*n)],
+                          np.concatenate([np.ones(n), 1.0/self.t_ion[:-1]]),
+                          shape=(2*n, 3*n))
 
     def _fun_particle(self, n, nt, nt2):
         res_nt = sparse.tensordot(nt, self.rate.Dij, axes=(0, 0))

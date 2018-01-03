@@ -1,7 +1,9 @@
 import pytest
 import numpy as np
+import sparse
 
 from neutral_diffusion import model1d
+from neutral_diffusion.utils import vec2coo
 from neutral_diffusion.constants import EV
 
 
@@ -18,7 +20,27 @@ m2 = m * 2.0  # isotope
 rng = np.random.RandomState(0)
 
 
-def test_jac():
+model = model1d.Cylindrical(r, m)
+
+
+def test_C():
+    Ct = model.Ct()
+    D = model.D()
+    n = np.random.randn(size-1)
+    t = np.random.randn(size-1)
+    x = np.concatenate([n, n*t, n*t*t])
+
+    C = sparse.tensordot(Ct, vec2coo(t), axes=(-1, 0)) - D
+    assert np.allclose(sparse.tensordot(C, vec2coo(x), axes=(1, 0)).todense(),
+                       0.0)
+
+    Ctx = sparse.tensordot(Ct, vec2coo(x), axes=(1, 0))
+    Dx = sparse.tensordot(D, vec2coo(x), axes=(1, 0))
+    assert np.allclose((sparse.tensordot(Ctx, vec2coo(t), axes=(1, 0)) - Dx),
+                       0.0)
+
+
+'''def test_jac():
     ninit = np.cumsum(np.exp(rng.randn(size - 1) * 0.2))
     ninit /= ninit[-1]
     tinit = np.cumsum(np.exp(rng.randn(size - 1) * 0.2)) * 30
@@ -150,7 +172,6 @@ def _test_jac_mix():
 @pytest.mark.parametrize('always_positive', [False, True])
 @pytest.mark.parametrize('method', ['leastsq'])
 def test_cylindrical(use_jac, always_positive, method):
-    model = model1d.Cylindrical(r, m)
     tatom = 0.8 * tion - 2.0
     model.initialize(rion, rcx, tion, tatom[-1], n_edge=1.0)
     n, t, res = model.solve_nt(
@@ -172,7 +193,7 @@ def test_cylindrical(use_jac, always_positive, method):
         assert np.allclose(lhs[:-2], rhs[:-2], rtol=0.3)
 
 
-'''@pytest.mark.parametrize('use_jac', [False, True])
+@pytest.mark.parametrize('use_jac', [False, True])
 @pytest.mark.parametrize('always_positive', [False, True])
 @pytest.mark.parametrize('method', [None])
 def test_cylindrical_tfix(use_jac, always_positive, method):
