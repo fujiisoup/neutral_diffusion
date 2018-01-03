@@ -94,43 +94,9 @@ class Cylindrical(object):
             Neutral atom temperature.
         """
         self.initialize(rate_ion, rate_cx, t_ion, t_edge, n_edge)
-
-        if n_init is None:
-            n_therm = 1.0 / t_ion
-            # penetration view
-            v_th = np.sqrt(EV * t_edge / self.rate.m)
-            integrand = rate_ion / v_th
-            integ = [np.trapz(integrand[::-1][:i], self.r[::-1][:i]) for i in
-                     range(self.size)]
-            n_penet = 1.0 * np.exp(np.array(integ[::-1]))
-
-        if t_init is None:
-            # with complete thermalize limit
-            n_1 = (n_therm + n_penet) / 2.0
-            t_1 = t_ion
-            n_1, t_1, _ = self.solve_t(n_1, t_1, True, False, **kwargs)
-            t_1 = np.minimum(np.maximum(np.min(t_ion), t_1), np.max(t_ion))
-            n_1, t_1, _ = self.solve_n(n_1, t_1, True, False, **kwargs)
-            n_1, t_1, res_1 = self.solve_t(n_1, t_1, True, False, **kwargs)
-            t_1 = np.minimum(np.maximum(np.min(t_ion), t_1), np.max(t_ion))
-            return self.solve_nt(n_1, t_1, True, always_positive, **kwargs)
-
-            n_2 = n_init
-            t_2 = np.ones_like(t_ion) * t_edge
-            n_2, t_2, _ = self.solve_t(n_2, t_2, True, True, **kwargs)
-            n_2, t_2, _ = self.solve_n(n_2, t_2, True, False, **kwargs)
-            n_2, t_2, res_2 = self.solve_t(n_2, t_2, True, True, **kwargs)
-
-            n_3, t_3, res_3 = self.solve_t((n_1 + n_2) / 2, t_2, True, True,
-                                           **kwargs)
-
-            n_inits = [n_1, n_2, n_3]
-            t_inits = [t_1, t_2, t_3]
-            errors = [res_1['optimality'], res_2['optimality'],
-                      res_3['optimality']]
-            n_init = n_inits[np.argmin(errors)]
-            t_init = t_inits[np.argmin(errors)]
-        return self.solve_nt(n_init, t_init, True, always_positive, **kwargs)
+        n_init = 1.0 / t_ion * t_ion[-1]
+        t_init = t_ion / t_ion[-1] * t_edge
+        return self.solve_core(n_init, t_init)
 
     def initialize(self, rate_ion, rate_cx, t_ion, t_edge, n_edge):
         for v in [rate_ion, rate_cx, t_ion]:
@@ -141,7 +107,7 @@ class Cylindrical(object):
         self.t_ion = t_ion
         self.n_edge = n_edge
         self.nt_edge = n_edge * t_edge
-        self.nt2_edge = n_edge * t_edge * t_edge
+        self.ntt_edge = n_edge * t_edge * t_edge
 
         n = self.size-1
         # prepare matrices
@@ -178,7 +144,7 @@ class Cylindrical(object):
                   - 1.5 * self.nt_edge * sparse.tensordot(
                         self.rate.Rij, self.rate.slice_last,
                         axes=(0, 0))
-                  + 2.5 * self.nt2_edge * sparse.tensordot(
+                  + 2.5 * self.ntt_edge * sparse.tensordot(
                         self.rate.Dij, self.rate.slice_last,
                         axes=(0, 0))).todense()
         self.b = - np.concatenate([b_part, b_engy])
@@ -187,22 +153,24 @@ class Cylindrical(object):
         self.L = scipy.sparse.hstack([scipy.sparse.identity(n),
                                       scipy.sparse.identity(n) * (-2.0),
                                       scipy.sparse.identity(n)])
-        # Lagrange constants
-        self.lam = np.zeros(n)
 
     def solve_core(self, n_init, t_init, maxiter=100, rho=1.0, xtol=1.0e-3):
         # initial values
         x = np.concatenate([np.log(n_init[:-1]),
                             np.log(n_init[:-1]) + np.log(t_init[:-1]),
                             np.log(n_init[:-1]) + 2 * np.log(t_init[:-1])])
+        # Lagrange constants
+        lam = np.zeros(self.size-1)
 
+        # TODO take care the very high density case.
+        # If n << 1, then the matrix Ay would be singular.
         for it in range(maxiter):
             # update by neuton method
             y = np.exp(x)
             Ay = (self.A * vec2coo(y)).to_scipy_sparse()
             X = Ay.T @ Ay + rho * self.L.T @ self.L
             coef = - Ay.T @ (self.A @ y - self.b)
-            # coef += self.L.T @ self.lam
+            coef += self.L.T @ lam
             coef += -rho * self.L.T @ self.L @ x
             x_new = x + scipy.sparse.linalg.spsolve(X, coef)
 
@@ -211,7 +179,7 @@ class Cylindrical(object):
                 break
 
             x = x_new
-            self.lam -= rho * (self.L @ x)
+            lam -= rho * (self.L @ x)
 
         n = np.concatenate([np.exp(x[:self.size-1]), [self.n_edge]])
         nt = np.concatenate([np.exp(x[self.size-1:2*(self.size-1)]),
@@ -229,7 +197,6 @@ class Cylindrical_mixed(object):
         self.rate2 = Rate_cylindrical(r, m2)
         self.r = self.rate1.r
         self.size = len(self.r)
-        n = self.size
 
     def solve(self, rate_ion, rate1_cx, rate2_cx, t_ion, t1_edge, t2_edge,
               n1_init=None, n2_init=None, t1_init=None, t2_init=None,
@@ -259,30 +226,7 @@ class Cylindrical_mixed(object):
             Neutral atom temperature.
         """
         self.initialize(rate_ion, rate1_cx, rate2_cx, t_ion, t1_edge, t2_edge)
-
-        if n_init is None:
-            n_init = 1.0 / t_ion
-
-        if t_init is None:
-            # with complete thermalize limit
-            t_1 = t_ion
-            n_1, t_1, _ = self.solve_n(n_init, t_1, True, False, **kwargs)
-            n_1, t_1, res_1 = self.solve_t(n_1, t_1, True, False, **kwargs)
-
-            t_2 = np.ones_like(t_ion) * t_edge
-            n_2, t_2, _ = self.solve_n(n_init, t_2, True, False, **kwargs)
-            n_2, t_2, res_2 = self.solve_t(n_2, t_2, True, False, **kwargs)
-
-            n_3, t_3, res_3 = self.solve_t((n_1 + n_2) / 2, t_2, True, False,
-                                           **kwargs)
-
-            n_inits = [n_1, n_2, n_3]
-            t_inits = [t_1, t_2, t_3]
-            errors = [res_1['optimality'], res_2['optimality'],
-                      res_3['optimality']]
-            n_init = n_inits[np.argmin(errors)]
-            t_init = t_inits[np.argmin(errors)]
-        return self.solve_nt(n_init, t_init, True, always_positive, **kwargs)
+        raise NotImplementedError
 
     def initialize(self, rate_ion, rate1_cx, rate2_cx, t_ion,
                    t1_edge, t2_edge, n1_edge, n2_edge):
@@ -292,223 +236,167 @@ class Cylindrical_mixed(object):
                                                 v.shape, self.r.shape))
         self.rate1.initialize(rate_ion + rate1_cx + rate2_cx, rate1_cx, t_ion)
         self.rate2.initialize(rate_ion + rate1_cx + rate2_cx, rate2_cx, t_ion)
-        self.kt_ion = EV * t_ion
-        self.kt1_edge = t1_edge * EV / self.kt_ion[-1]
-        self.kt2_edge = t2_edge * EV / self.kt_ion[-1]
+        self.t_ion = t_ion
         self.n1_edge = n1_edge
         self.n2_edge = n2_edge
+        self.nt1_edge = n1_edge * t1_edge
+        self.nt2_edge = n2_edge * t2_edge
+        self.ntt1_edge = n1_edge * t1_edge * t1_edge
+        self.ntt2_edge = n2_edge * t2_edge * t2_edge
 
-    def get_n(self, x, always_positive):
-        n = np.exp(x) if always_positive else x
-        return (vec2coo(np.concatenate([n[:self.size-1], [self.n1_edge]])),
-                vec2coo(np.concatenate([n[self.size-1:], [self.n2_edge]])))
+        n = self.size-1
+        # prepare matrices
+        # particle balance
+        # atom1
+        A_part1 = sparse.concatenate([
+            -sparse.tensordot(self.rate1.Rij + self.rate1.Sij,
+                              self.rate1.slice_l, axes=(0, 0)),
+            sparse.tensordot(self.rate1.Dij, self.rate1.slice_l, axes=(0, 0)),
+            sparse.COO([], [], shape=(n, n)),
+            -sparse.tensordot(self.rate1.Sij, self.rate1.slice_l, axes=(0, 0)),
+            sparse.COO([], [], shape=(n, n)),
+            sparse.COO([], [], shape=(n, n)),
+        ], axis=0).T
+        # atom2
+        A_part2 = sparse.concatenate([
+            -sparse.tensordot(self.rate2.Sij, self.rate2.slice_l, axes=(0, 0)),
+            sparse.COO([], [], shape=(n, n)),
+            sparse.COO([], [], shape=(n, n)),
+            -sparse.tensordot(self.rate2.Rij + self.rate2.Sij,
+                              self.rate2.slice_l, axes=(0, 0)),
+            sparse.tensordot(self.rate2.Dij, self.rate2.slice_l, axes=(0, 0)),
+            sparse.COO([], [], shape=(n, n)),
+        ], axis=0).T
 
-    def get_t(self, x, always_positive):
-        t = np.exp(x) if always_positive else x
-        return (vec2coo(np.concatenate([t[:self.size-1], [self.kt1_edge]])),
-                vec2coo(np.concatenate([t[self.size-1:], [self.kt2_edge]])))
+        # energy balance
+        # atom1
+        A_engy1 = sparse.concatenate([
+            -1.5 * sparse.tensordot(self.rate1.Eij, self.rate1.slice_l,
+                                    axes=(0, 0)),
+            -1.5 * sparse.tensordot(self.rate1.Rij, self.rate1.slice_l,
+                                    axes=(0, 0)),
+            2.5 * sparse.tensordot(self.rate1.Dij, self.rate1.slice_l,
+                                   axes=(0, 0)),
+            -1.5 * sparse.tensordot(self.rate1.Eij, self.rate2.slice_l,
+                                    axes=(0, 0)),
+            sparse.COO([], [], shape=(n, n)),
+            sparse.COO([], [], shape=(n, n)),
+        ], axis=0).T
+        # atom2
+        A_engy2 = sparse.concatenate([
+            -1.5 * sparse.tensordot(self.rate2.Eij, self.rate1.slice_l,
+                                    axes=(0, 0)),
+            sparse.COO([], [], shape=(n, n)),
+            sparse.COO([], [], shape=(n, n)),
+            -1.5 * sparse.tensordot(self.rate2.Eij, self.rate2.slice_l,
+                                    axes=(0, 0)),
+            -1.5 * sparse.tensordot(self.rate2.Rij, self.rate2.slice_l,
+                                    axes=(0, 0)),
+            2.5 * sparse.tensordot(self.rate2.Dij, self.rate2.slice_l,
+                                   axes=(0, 0)),
+        ], axis=0).T
 
-    def _fun_particle(self, n, t):
-        n1, n2 = n
-        t1, t2 = t
-        # for atom1
-        Dij = sparse.tensordot(t1, self.rate1.Dijl, axes=(0, 1))
-        res1 = sparse.tensordot(n1, Dij - self.rate1.Ril + self.rate1.Sil,
-                                axes=(0, 0))
-        res1 += sparse.tensordot(n2, self.rate1.Ril, axes=(0, 0))
-        # for atom2
-        Dij = sparse.tensordot(t2, self.rate2.Dijl, axes=(0, 1))
-        res2 = sparse.tensordot(n2, Dij - self.rate2.Ril + self.rate2.Sil,
-                                axes=(0, 0))
-        res2 += sparse.tensordot(n1, self.rate2.Ril, axes=(0, 0))
-        return np.concatenate([res1, res2])
+        # balance matrix.
+        self.A = sparse.concatenate([A_part1, A_part2, A_engy1, A_engy2],
+                                    axis=0)
+        # boundary conditions
+        b_part1 = (- self.n1_edge * sparse.tensordot(
+                        self.rate1.Rij + self.rate1.Sij,
+                        self.rate1.slice_last, axes=(0, 0))
+                   + self.nt1_edge * sparse.tensordot(
+                        self.rate1.Dij,
+                        self.rate1.slice_last, axes=(0, 0))
+                   - self.n2_edge * sparse.tensordot(
+                        self.rate1.Sij,
+                        self.rate1.slice_last, axes=(0, 0))).todense()
 
-    def _fun_energy(self, n, t):
-        n1, n2 = n
-        t1, t2 = t
-        # for atom1
-        Fij = sparse.tensordot(t1, sparse.tensordot(
-                    t1, self.rate1.Fijkl, axes=(0, 2)), axes=(0, 1))
-        Gil = sparse.tensordot(t1, self.rate1.Gijl, axes=(0, 1))
-        res1 = sparse.tensordot(n1, Fij - Gil - self.rate1.Hil, axes=(0, 0))
-        res1 -= sparse.tensordot(n2, self.rate1.Hil, axes=(0, 0))
-        # for atom2
-        Fij = sparse.tensordot(t2, sparse.tensordot(
-                    t2, self.rate2.Fijkl, axes=(0, 2)), axes=(0, 1))
-        Gil = sparse.tensordot(t2, self.rate2.Gijl, axes=(0, 1))
-        res2 = sparse.tensordot(n2, Fij - Gil - self.rate2.Hil, axes=(0, 0))
-        res2 -= sparse.tensordot(n1, self.rate2.Hil, axes=(0, 0))
-        return np.concatenate([res1, res2])
+        b_part2 = (- self.n2_edge * sparse.tensordot(
+                        self.rate2.Rij + self.rate2.Sij,
+                        self.rate2.slice_last, axes=(0, 0))
+                   + self.nt2_edge * sparse.tensordot(
+                        self.rate2.Dij,
+                        self.rate2.slice_last, axes=(0, 0))
+                   - self.n1_edge * sparse.tensordot(
+                        self.rate2.Sij,
+                        self.rate2.slice_last, axes=(0, 0))).todense()
 
-    def _jac_n_particle(self, n, t):
-        # returns a jacobian for density. dfi_dnj
-        n1, n2 = n
-        t1, t2 = t
-        # derivative by atom1
-        Dij = sparse.tensordot(t1, self.rate1.Dijl, axes=(0, 1))
-        df1_dn1 = Dij - self.rate1.Ril + self.rate1.Sil
-        df2_dn1 = self.rate2.Ril
-        df_dn1 = sparse.tensordot(
-                sparse.concatenate([df1_dn1, df2_dn1], axis=1),
-                self.rate1.slice_l, axes=(0, 0))
+        b_engy1 = (- 1.5 * self.n1_edge * sparse.tensordot(
+                        self.rate1.Eij, self.rate1.slice_last,
+                        axes=(0, 0))
+                   - 1.5 * self.nt1_edge * sparse.tensordot(
+                        self.rate1.Rij, self.rate1.slice_last,
+                        axes=(0, 0))
+                   + 2.5 * self.ntt1_edge * sparse.tensordot(
+                        self.rate1.Dij, self.rate1.slice_last,
+                        axes=(0, 0))
+                   - 1.5 * self.n2_edge * sparse.tensordot(
+                        self.rate1.Eij, self.rate1.slice_last,
+                        axes=(0, 0))).todense()
 
-        Dij = sparse.tensordot(t2, self.rate2.Dijl, axes=(0, 1))
-        df2_dn2 = Dij - self.rate2.Ril + self.rate2.Sil
-        df1_dn2 = self.rate1.Ril
-        df_dn2 = sparse.tensordot(
-                sparse.concatenate([df1_dn2, df2_dn2], axis=1),
-                self.rate1.slice_l, axes=(0, 0))
-        return sparse.concatenate([df_dn1, df_dn2], axis=1)
+        b_engy2 = (- 1.5 * self.n2_edge * sparse.tensordot(
+                        self.rate2.Eij, self.rate2.slice_last,
+                        axes=(0, 0))
+                   - 1.5 * self.nt2_edge * sparse.tensordot(
+                        self.rate2.Rij, self.rate2.slice_last,
+                        axes=(0, 0))
+                   + 2.5 * self.ntt2_edge * sparse.tensordot(
+                        self.rate2.Dij, self.rate2.slice_last,
+                        axes=(0, 0))
+                   - 1.5 * self.n1_edge * sparse.tensordot(
+                        self.rate2.Eij, self.rate2.slice_last,
+                        axes=(0, 0))).todense()
 
-    def _jac_t_particle(self, n, t):
-        # returns a jacobian for density. dfi_dnj
-        n1, n2 = n
-        t1, t2 = t
-        Dij = sparse.tensordot(n1, self.rate1.Dijl, axes=(0, 0))
-        df_dt1 = sparse.tensordot(
-                sparse.concatenate([
-                    Dij, sparse.COO(None, shape=(self.size, self.size-1))
-                ], axis=1), self.rate1.slice_l, axes=(0, 0))
+        self.b = - np.concatenate([b_part1, b_part2, b_engy1, b_engy2])
 
-        Dij = sparse.tensordot(n2, self.rate2.Dijl, axes=(0, 0))
-        df_dt2 = sparse.tensordot(
-                sparse.concatenate([
-                    sparse.COO(None, shape=(self.size, self.size-1)), Dij
-                ], axis=1), self.rate2.slice_l, axes=(0, 0))
-        return sparse.concatenate([df_dt1, df_dt2], axis=1)
+        # matrix for the constraint
+        L1 = scipy.sparse.hstack([scipy.sparse.identity(n),
+                                  scipy.sparse.identity(n) * (-2.0),
+                                  scipy.sparse.identity(n),
+                                  scipy.sparse.coo_matrix((n, n)),
+                                  scipy.sparse.coo_matrix((n, n)),
+                                  scipy.sparse.coo_matrix((n, n))])
+        L2 = scipy.sparse.hstack([scipy.sparse.coo_matrix((n, n)),
+                                  scipy.sparse.coo_matrix((n, n)),
+                                  scipy.sparse.coo_matrix((n, n)),
+                                  scipy.sparse.identity(n),
+                                  scipy.sparse.identity(n) * (-2.0),
+                                  scipy.sparse.identity(n)])
+        self.L = scipy.sparse.vstack([L1, L2])
 
-    def _jac_n_energy(self, n, t):
-        n1, n2 = n
-        t1, t2 = t
-        # dn1
-        Fij = sparse.tensordot(t1, sparse.tensordot(
-                    t1, self.rate1.Fijkl, axes=(0, 2)), axes=(0, 1))
-        Gil = sparse.tensordot(t1, self.rate1.Gijl, axes=(0, 1))
-        df1_dn1 = Fij - Gil - self.rate1.Hil
-        df2_dn1 = -self.rate2.Hil
-        df_dn1 = sparse.tensordot(
-                sparse.concatenate([df1_dn1, df2_dn1], axis=1),
-                self.rate1.slice_l, axes=(0, 0))
-        # dn2
-        Fij = sparse.tensordot(t2, sparse.tensordot(
-                    t2, self.rate2.Fijkl, axes=(0, 2)), axes=(0, 1))
-        Gil = sparse.tensordot(t2, self.rate2.Gijl, axes=(0, 1))
-        df2_dn2 = Fij - Gil - self.rate2.Hil
-        df1_dn2 = -self.rate1.Hil
-        df_dn2 = sparse.tensordot(
-                sparse.concatenate([df1_dn2, df2_dn2], axis=1),
-                self.rate2.slice_l, axes=(0, 0))
-        return sparse.concatenate([df_dn1, df_dn2], axis=1)
+    def solve_core(self, n1_init, n2_init, t1_init, t2_init, maxiter=100,
+                   rho=1.0, xtol=1.0e-3):
+        # initial values
+        x = np.concatenate([np.log(n1_init[:-1]),
+                            np.log(n1_init[:-1]) + np.log(t1_init[:-1]),
+                            np.log(n1_init[:-1]) + 2 * np.log(t1_init[:-1]),
+                            np.log(n2_init[:-1]),
+                            np.log(n2_init[:-1]) + np.log(t2_init[:-1]),
+                            np.log(n2_init[:-1]) + 2 * np.log(t2_init[:-1])])
+        # Lagrange constants
+        n = self.size-1
+        lam = np.zeros(2 * n)
 
-    def _jac_t_energy(self, n, t):
-        n1, n2 = n
-        t1, t2 = t
+        # TODO take care the very high density case.
+        # If n << 1, then the matrix Ay would be singular.
+        for it in range(maxiter):
+            # update by neuton method
+            y = np.exp(x)
+            Ay = (self.A * vec2coo(y)).to_scipy_sparse()
+            X = Ay.T @ Ay + rho * self.L.T @ self.L
+            coef = - Ay.T @ (self.A @ y - self.b)
+            coef += self.L.T @ lam
+            coef += -rho * self.L.T @ self.L @ x
+            x_new = x + scipy.sparse.linalg.spsolve(X, coef)
 
-        Fij = 2.0 * sparse.tensordot(n1, sparse.tensordot(
-                    t1, self.rate1.Fijkl, axes=(0, 2)), axes=(0, 0))
-        Gil = sparse.tensordot(n1, self.rate1.Gijl, axes=(0, 0))
-        df_dt1 = sparse.tensordot(
-                sparse.concatenate([
-                    Fij - Gil, sparse.COO(None, shape=(self.size, self.size-1))
-                ], axis=1), self.rate1.slice_l, axes=(0, 0))
+            if np.max(np.abs(x_new - x)) < xtol:
+                x = x_new
+                break
 
-        Fij = 2.0 * sparse.tensordot(n2, sparse.tensordot(
-                    t2, self.rate2.Fijkl, axes=(0, 2)), axes=(0, 0))
-        Gil = sparse.tensordot(n2, self.rate2.Gijl, axes=(0, 0))
-        df_dt2 = sparse.tensordot(
-                sparse.concatenate([
-                    sparse.COO(None, shape=(self.size, self.size-1)), Fij - Gil
-                ], axis=1), self.rate1.slice_l, axes=(0, 0))
-        return sparse.concatenate([df_dt1, df_dt2], axis=1)
+            x = x_new
+            lam -= rho * (self.L @ x)
 
-    def solve_n(self, n1_init, n2_init, t1_init, t2_init, use_jac,
-                always_positive, **kwargs):
-        def fun(x):
-            return self._fun_particle(self.get_n(x, always_positive),
-                                      (vec2coo(t1_init), vec2coo(t2_init)))
-
-        def jac(x):
-            jac_n = self._jac_n_particle(self.get_n(x, always_positive),
-                                         (vec2coo(t1_init), vec2coo(t2_init)))
-            if always_positive:
-                jac_n *= vec2coo(np.exp(x))
-            return jac_n.todense()
-
-        # initial guess
-        n1_init = n2_init * self.kt_ion / self.kt_ion[-1] * self.n1_edge
-        n2_init = n2_init * self.kt_ion / self.kt_ion[-1] * self.n2_edge
-        x_init = np.concatenate([n1_init[:-1], n2_init[:-1]])
-        x_init = np.log(x_init) if always_positive else x_init
-
-        t1_init = t1_init * EV / self.kt_ion
-        t2_init = t2_init * EV / self.kt_ion
-        if use_jac:
-            res = scipy.optimize.least_squares(fun, x_init, jac=jac, **kwargs)
-        else:
-            res = scipy.optimize.least_squares(fun, x_init, **kwargs)
-        n1, n2 = self.get_n(res['x'][:self.size-1], always_positive)
-        n1 = n1.todense() / self.kt_ion * self.kt_ion[-1]
-        n2 = n2.todense() / self.kt_ion * self.kt_ion[-1]
-        t1 = t1_init * self.kt_ion / EV
-        t2 = t2_init * self.kt_ion / EV
-        return n1, n2, t1, t2, res
-
-    def solve_t(self, n_init, t_init, use_jac, always_positive, **kwargs):
-        def fun(x):
-            res = self._fun_energy(vec2coo(n_init),
-                                   self.get_t(x, always_positive))
-            return res.todense() if isinstance(res, sparse.COO) else res
-
-        def jac(x):
-            jac_t = self._jac_t_energy(vec2coo(n_init),
-                                       self.get_t(x, always_positive))
-            if always_positive:
-                jac_t *= vec2coo(np.exp(x))
-            return jac_t.todense()
-
-        # initial guess
-        n_init = n_init * self.kt_ion / self.kt_ion[-1]
-        t_init = t_init * EV / self.kt_ion
-        x_init = np.log(t_init[:-1]) if always_positive else t_init[:-1]
-        if use_jac:
-            res = scipy.optimize.least_squares(fun, x_init, jac=jac, **kwargs)
-        else:
-            res = scipy.optimize.least_squares(fun, x_init, **kwargs)
-        n = n_init / self.kt_ion * self.kt_ion[-1]
-        t = self.get_t(res['x'], always_positive).todense() * self.kt_ion / EV
-        return n, t, res
-
-    def solve_nt(self, n_init, t_init, use_jac, always_positive, **kwargs):
-        def fun(x):
-            n = self.get_n(x[:self.size-1], always_positive)
-            t = self.get_nt(x[self.size-1:], always_positive)
-            return np.concatenate([self._fun_particle(n, t),
-                                   self._fun_energy(n, t)])
-
-        def jac(x):
-            n = self.get_n(x[:self.size-1], always_positive)
-            t = self.get_t(x[self.size-1:], always_positive)
-            jac_nt = np.concatenate(
-                [np.concatenate([self._jac_n_particle(n, t).todense(),
-                                 self._jac_n_energy(n, t).todense()], axis=0),
-                 np.concatenate([self._jac_n_particle(n, t).todense(),
-                                 self._jac_n_energy(n, t).todense()], axis=0)],
-                axis=1)
-            if always_positive:
-                jac_nt *= np.exp(x)
-            return jac_nt
-
-        # initial guess
-        n_init = n_init * self.kt_ion / self.kt_ion[-1]
-        t_init = t_init * EV / self.kt_ion
-        x_init = np.concatenate([n_init[:-1], t_init[:-1]])
-        x_init = np.log(x_init) if always_positive else x_init
-        if use_jac:
-            res = scipy.optimize.least_squares(fun, x_init, jac=jac, **kwargs)
-        else:
-            res = scipy.optimize.least_squares(fun, x_init, **kwargs)
-        n = self.get_n(res['x'][:self.size-1], always_positive)
-        n = n.todense() / self.kt_ion * self.kt_ion[-1]
-        t = self.get_t(res['x'][self.size-1:], always_positive)
-        t = t.todense() * self.kt_ion / EV
-        return n, t, res
+        n1 = np.concatenate([np.exp(x[:n]), [self.n1_edge]])
+        nt1 = np.concatenate([np.exp(x[n:2*n]), [self.nt1_edge]])
+        n2 = np.concatenate([np.exp(x[3*n:4*n]), [self.n2_edge]])
+        nt2 = np.concatenate([np.exp(x[4*n:5*n]), [self.nt2_edge]])
+        return n1, n2, nt1 / n1, nt2 / n2, it
