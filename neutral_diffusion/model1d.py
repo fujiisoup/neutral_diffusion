@@ -67,8 +67,7 @@ class Cylindrical(object):
         self.size = len(self.r)
 
     def solve(self, rate_ion, rate_cx, t_ion, t_edge, n_edge=1.0,
-              n_init=None, t_init=None,
-              always_positive=False, **kwargs):
+              n_init=None, t_init=None, maxiter=100):
         """
         Solve a diffusion equation with particular paramters.
 
@@ -84,19 +83,25 @@ class Cylindrical(object):
             Initial guess of atom density [m^-3]
         t_init: 1d array-like
             Initial guess of atom temperature [eV]
+        maxiter: integer
+            Maximum number of iteration
 
         Returns
         -------
         n: 1d array-like
             Neutral atom density. This is normalized so that the edge density
-            is 1.
-        t_atom: 1d array-like
+            is n_edge.
+        t: 1d array-like
             Neutral atom temperature.
+        it: integer
+            Number of iteration.
         """
         self.initialize(rate_ion, rate_cx, t_ion, t_edge, n_edge)
-        n_init = 1.0 / t_ion * t_ion[-1]
-        t_init = t_ion / t_ion[-1] * t_edge
-        return self.solve_core(n_init, t_init)
+        if n_init is None:
+            n_init = n_edge / t_ion * t_ion[-1]
+        if t_init is None:
+            t_init = t_ion / t_ion[-1] * t_edge
+        return self.solve_core(n_init, t_init, maxiter)
 
     def initialize(self, rate_ion, rate_cx, t_ion, t_edge, n_edge):
         for v in [rate_ion, rate_cx, t_ion]:
@@ -199,34 +204,57 @@ class Cylindrical_mixed(object):
         self.size = len(self.r)
 
     def solve(self, rate_ion, rate1_cx, rate2_cx, t_ion, t1_edge, t2_edge,
+              n1_edge, n2_edge,
               n1_init=None, n2_init=None, t1_init=None, t2_init=None,
-              always_positive=False, **kwargs):
+              maxiter=100, **kwargs):
         """
         Solve a diffusion equation with particular paramters.
 
         rate_ion: 1d array-like
             Ionization rate [/s].
-        rate_cx, rate2_cx: 1d array-like
-            Charge exchange rate [/s] for atom1 and atom2.
+        rate1_cx: 1d array-like
+            Charge exchange rate by ion 1 [/s].
+        rate2_cx: 1d array-like
+            Charge exchange rate by ion 1 [/s].
         t_ion: 1d array-like
             Ion temperature in plasmas [eV]
-        t_edge and t2_edge: float
-            Edge temperature of atoms [eV] for atom1 and atom2
-        n_init, n2_init: 1d array-like
+        t1_edge: float
+            Edge temperature of atom 1 [eV]
+        t2_edge: float
+            Edge temperature of atom 2 [eV]
+        n1_edge: float
+            Edge density of atom 1 [eV]
+        n2_edge: float
+            Edge density of atom 2 [eV]
+        n_init: 1d array-like
             Initial guess of atom density [m^-3]
-        t_init, t2_init: 1d array-like
+        t_init: 1d array-like
             Initial guess of atom temperature [eV]
+        maxiter: integer
+            Maximum number of iteration
 
         Returns
         -------
         n: 1d array-like
             Neutral atom density. This is normalized so that the edge density
-            is 1.
-        t_atom: 1d array-like
+            is n_edge.
+        t: 1d array-like
             Neutral atom temperature.
+        it: integer
+            Number of iteration.
         """
-        self.initialize(rate_ion, rate1_cx, rate2_cx, t_ion, t1_edge, t2_edge)
-        raise NotImplementedError
+        self.initialize(rate_ion, rate1_cx, rate2_cx, t_ion,
+                        t1_edge, t2_edge, n1_edge, n2_edge)
+        if n1_init is None:
+            n1_init = n1_edge / t_ion * t_ion[-1]
+        if n2_init is None:
+            n2_init = n2_edge / t_ion * t_ion[-1]
+        if t1_init is None:
+            t1_init = t_ion / t_ion[-1] * t1_edge
+        if t2_init is None:
+            t2_init = t_ion / t_ion[-1] * t2_edge
+        return self.solve_core(n1_init, n2_init, t1_init, t2_init, maxiter,
+                               **kwargs)
 
     def initialize(self, rate_ion, rate1_cx, rate2_cx, t_ion,
                    t1_edge, t2_edge, n1_edge, n2_edge):
