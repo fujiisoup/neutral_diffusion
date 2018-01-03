@@ -10,7 +10,7 @@ from neutral_diffusion.constants import EV
 r = np.cumsum(np.linspace(0.1, 0.01, 30))
 r /= r[-1]
 size = len(r)
-rion = ((1 - r**4) + 0.1) * 1.0e6  # [/s]
+rion = ((1 - r**4) + 0.1) * 1.0e5  # [/s]
 rcx = rion * 2  # [/s]
 r2cx = rion * 4  # [/s]
 tion = np.exp(- r * r * 4.0) * 1.0e3 + 3.0  # [eV]
@@ -20,25 +20,33 @@ m2 = m * 2.0  # isotope
 rng = np.random.RandomState(0)
 
 
-model = model1d.Cylindrical(r, m)
-
-
-def test_C():
-    Ct = model.Ct()
-    D = model.D()
+def test_L():
+    model = model1d.Cylindrical(r, m)
+    model.initialize(rion, rcx, tion, n_edge=1.0, t_edge=3.0)
+    L = model.L
     n = np.random.randn(size-1)
     t = np.random.randn(size-1)
-    x = np.concatenate([n, n*t, n*t*t])
+    x = np.concatenate([n, n+t, n+t+t])
+    assert np.allclose(L @ x, 0.0)
 
-    C = sparse.tensordot(Ct, vec2coo(t), axes=(-1, 0)) - D
-    assert np.allclose(sparse.tensordot(C, vec2coo(x), axes=(1, 0)).todense(),
-                       0.0)
 
-    Ctx = sparse.tensordot(Ct, vec2coo(x), axes=(1, 0))
-    Dx = sparse.tensordot(D, vec2coo(x), axes=(1, 0))
-    assert np.allclose((sparse.tensordot(Ctx, vec2coo(t), axes=(1, 0)) - Dx),
-                       0.0)
+def test_solve():
+    model = model1d.Cylindrical(r, m)
+    model.initialize(rion, rcx, tion, n_edge=1.0, t_edge=3.0)
 
+    n_init = 1.0 / tion * tion[-1]
+    t_init = tion
+
+    n, t, it = model.solve_core(n_init, t_init, rho=0.1)
+
+    # make sure this solution satisfies the differential equation
+    rmu = r / (m * (rion + rcx))
+    dndr = np.gradient(EV * n * t, r)
+    lhs = np.gradient(rmu * dndr, r)
+    rhs = r * rion * n
+    assert np.allclose(lhs[:-2], rhs[:-2], rtol=0.05, atol=1.0e2)
+
+    
 
 '''def test_jac():
     ninit = np.cumsum(np.exp(rng.randn(size - 1) * 0.2))
